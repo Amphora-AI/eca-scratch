@@ -1,0 +1,11 @@
+node_modules/
+*.log
+
+# Never commit JWT material or org credentials
+*.key
+*.pem
+*.crt
+server.key
+server.crt
+.env
+.env.*

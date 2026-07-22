@@ -1,0 +1,23 @@
+{
+  "$comment": [
+    "Packages installed into every scratch org immediately after provisioning, IN ORDER.",
+    "Copy to config/scratch-packages.json in the target repo (or point SCRATCH_PACKAGES_PATH at it).",
+    "List dependencies before dependents \u2014 installs run sequentially.",
+    "Required by default: a failed install stops the pipeline. Set \"optional\": true to downgrade to a warning.",
+    "Replace 04tXXXXXXXXXXXXXXX with your own subscriber package VERSION id. Find it with: sf package version list --target-dev-hub <hub> (the 'Package Version Id' / 04t column), or read it off the package install URL (...installPackage.apexp?p0=04t...)."
+  ],
+  "packages": [
+    {
+      "id": "04tXXXXXXXXXXXXXXX",
+      "name": "Your ECA package",
+      "$why": "Installs your External Client App package so later `sf project retrieve/deploy start` calls can authenticate against this scratch. Use YOUR org's 04t version id here."
+    },
+    {
+      "id": "04tYYYYYYYYYYYYYYY",
+      "name": "Example protected package",
+      "installationKeyEnv": "EXAMPLE_PKG_INSTALL_KEY",
+      "$why": "installationKeyEnv reads the key from an env var/secret so it is never committed.",
+      "optional": true
+    }
+  ]
+}

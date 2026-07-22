@@ -1,0 +1,71 @@
+# 01 — PR validation against a throwaway scratch org.
+#
+# The bread-and-butter workflow: every PR gets a fresh org, your source is deployed
+# into it, tests run, and the org is destroyed. Catches "works in my org" drift —
+# anything your code depends on that isn't in the repo will fail here.
+#
+# SECRETS REQUIRED (repo-level):  SF_CLIENT_ID, SF_USERNAME, SF_JWT_KEY
+# VARIABLES (optional):           SF_LOGIN_URL  (sandbox Dev Hub only)
+# See ../../docs/secrets-and-variables.md
+
+name: PR validation
+
+on:
+  pull_request:
+    branches: [main]
+
+# One run per PR — a new push cancels the old run and its org is cleaned up.
+concurrency:
+  group: scratch-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
+      SF_USERNAME: ${{ secrets.SF_USERNAME }}
+      SF_JWT_KEY: ${{ secrets.SF_JWT_KEY }}
+      SF_LOGIN_URL: ${{ vars.SF_LOGIN_URL || 'https://login.salesforce.com' }}
+      SCRATCH_DEF_PATH: config/project-scratch-def.json
+      SCRATCH_DURATION_DAYS: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli --no-fund --no-audit
+
+      # Provisions the org AND installs any packages from config/scratch-packages.json.
+      # Exports SFDX_ACCESS_TOKEN; `id:` exposes instance_url / org_id to later steps.
+      - name: Provision scratch org
+        id: scratch
+        run: node scripts/ci/provision-scratch.mjs provision
+
+      - name: Authenticate CLI to the scratch
+        run: |
+          sf org login access-token \
+            --instance-url "${{ steps.scratch.outputs.instance_url }}" \
+            --alias ci-scratch --no-prompt
+          sf config set target-org ci-scratch
+
+      - name: Deploy source
+        run: sf project deploy start --source-dir force-app --target-org ci-scratch --wait 30
+
+      - name: Run Apex tests
+        run: |
+          sf apex run test --target-org ci-scratch --code-coverage \
+            --result-format human --wait 30 --test-level RunLocalTests
+
+      # MUST be if: always() — a failed test would otherwise leak the org and burn
+      # the Dev Hub's active-org limit within a day or two.
+      - name: Delete scratch org
+        if: always() && steps.scratch.outputs.org_id != ''
+        run: node scripts/ci/provision-scratch.mjs delete --org-id "${{ steps.scratch.outputs.org_id }}"

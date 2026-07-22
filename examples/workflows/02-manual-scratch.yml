@@ -1,0 +1,85 @@
+# 02 — Spin up a scratch org on demand and hand it to a developer.
+#
+# Self-service org creation without giving every dev a Dev Hub login. Run it from the
+# Actions tab; the org's login URL and username appear in the step summary, and the org
+# is NOT deleted (that's the point). Set an expiry so it cleans itself up.
+#
+# SECRETS REQUIRED (repo-level):  SF_CLIENT_ID, SF_USERNAME, SF_JWT_KEY
+# See ../../docs/secrets-and-variables.md
+
+name: Create scratch org (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_days:
+        description: Days before the org auto-expires (1-30)
+        type: string
+        default: '7'
+      deploy_source:
+        description: Deploy force-app into the new org?
+        type: boolean
+        default: true
+      install_packages:
+        description: 'Extra 04t package version ids (comma-separated, optional)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
+      SF_USERNAME: ${{ secrets.SF_USERNAME }}
+      SF_JWT_KEY: ${{ secrets.SF_JWT_KEY }}
+      SF_LOGIN_URL: ${{ vars.SF_LOGIN_URL || 'https://login.salesforce.com' }}
+      SCRATCH_DEF_PATH: config/project-scratch-def.json
+      SCRATCH_DURATION_DAYS: ${{ inputs.duration_days }}
+      # Overrides config/scratch-packages.json when non-empty (see resolution precedence).
+      SCRATCH_INSTALL_PACKAGES: ${{ inputs.install_packages }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - run: npm install -g @salesforce/cli --no-fund --no-audit
+
+      - name: Provision scratch org
+        id: scratch
+        run: node scripts/ci/provision-scratch.mjs provision
+
+      - name: Deploy source
+        if: inputs.deploy_source
+        run: |
+          sf org login access-token \
+            --instance-url "${{ steps.scratch.outputs.instance_url }}" \
+            --alias new-scratch --no-prompt
+          sf project deploy start --source-dir force-app --target-org new-scratch --wait 30
+
+      # Generate a password so a human can actually log in.
+      - name: Generate login password
+        id: pw
+        continue-on-error: true
+        run: |
+          sf org generate password --target-org new-scratch --json > pw.json || true
+          echo "password=$(jq -r '.result.password // "generate manually"' pw.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Scratch org ready :rocket:"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Login URL | ${{ steps.scratch.outputs.instance_url }} |"
+            echo "| Username | \`${{ steps.scratch.outputs.username }}\` |"
+            echo "| Password | \`${{ steps.pw.outputs.password }}\` |"
+            echo "| Org ID | \`${{ steps.scratch.outputs.org_id }}\` |"
+            echo "| Expires in | ${{ inputs.duration_days }} day(s) |"
+            echo ""
+            echo "Delete early with the \`Delete scratch org\` workflow, or let it expire."
+          } >> "$GITHUB_STEP_SUMMARY"

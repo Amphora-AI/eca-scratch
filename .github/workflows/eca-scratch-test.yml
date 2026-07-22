@@ -1,0 +1,27 @@
+# Self-test for the provisioner in this repo. No secrets and no Salesforce org required —
+# test/verify.mjs stands up a mock Salesforce in-process and verifies the JWT
+# assertion against a throwaway keypair.
+name: eca-scratch-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax check
+        run: node --check scripts/ci/provision-scratch.mjs
+      - name: Verify provisioner end-to-end (mock Salesforce)
+        run: node test/verify.mjs
